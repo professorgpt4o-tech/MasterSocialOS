@@ -61,7 +61,7 @@ test('Bluesky repost fails when createRecord returns no uri (never marks reposte
     expect($result->isSuccessful())->toBeFalse();
 });
 
-test('Bluesky repost maps a connection failure to a retryable network result', function (): void {
+test('Bluesky repost maps a connection failure to a non-retryable ambiguous network result', function (): void {
     Http::fake(fn () => throw new ConnectionException('offline'));
 
     $account = ConnectedAccount::factory()->create(['platform' => Platform::Bluesky, 'remote_account_id' => 'did:plc:abc']);
@@ -76,5 +76,5 @@ test('Bluesky repost maps a connection failure to a retryable network result', f
     $result = app(BlueskyPublishConnector::class)->repost(new RepostContext($target, $account, $credentials));
 
     expect($result->isSuccessful())->toBeFalse()
-        ->and($result->errorKind?->isRetryable())->toBeTrue();
+        ->and($result->errorKind?->isRetryable())->toBeFalse();
 });
