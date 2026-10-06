@@ -9,16 +9,17 @@ use App\Jobs\DeletePostTarget;
 use App\Mcp\Tools\Concerns\WorkspaceTool;
 use App\Models\Post;
 use App\Models\PostTarget;
+use App\Services\Safety\PostActionFingerprint;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Delete a post. A draft is removed permanently; a published post is also deleted from the connected accounts where possible. Irreversible. Requires confirm=true.')]
+#[Description('Delete a post. A draft is removed permanently; a published post is also deleted from the connected accounts where possible. Irreversible. Requires confirm=true and the exact deletion_fingerprint returned by get_post.')]
 class DeletePostTool extends WorkspaceTool
 {
-    public function handle(Request $request): Response
+    public function handle(Request $request, PostActionFingerprint $fingerprints): Response
     {
         if ($this->bindWorkspace($request) === null) {
             return Response::error('This connection is not bound to a workspace. Reconnect and select a workspace.');
@@ -26,6 +27,7 @@ class DeletePostTool extends WorkspaceTool
 
         $validated = $request->validate([
             'post_id' => ['required', 'string'],
+            'deletion_fingerprint' => ['required', 'string', 'size:64', 'regex:/^[a-f0-9]{64}$/'],
             'confirm' => ['boolean'],
         ]);
 
@@ -38,10 +40,15 @@ class DeletePostTool extends WorkspaceTool
             return $denied;
         }
 
+        $currentFingerprint = $fingerprints->delete($post);
+        if (! hash_equals($currentFingerprint, (string) $validated['deletion_fingerprint'])) {
+            return Response::error('Deletion fingerprint mismatch. The post or its remote targets changed after approval. Fetch the post again and obtain a new deletion approval.');
+        }
+
         $hadBeenPublished = in_array($post->status, [PostStatus::Published, PostStatus::Partial, PostStatus::Failed], true);
         $consequence = $hadBeenPublished
-            ? 'This will delete the post from its connected accounts where possible.'
-            : 'This will permanently delete the draft.';
+            ? 'This will delete the exact fingerprinted post from its connected accounts where possible.'
+            : 'This will permanently delete the exact fingerprinted draft.';
 
         if ($unconfirmed = $this->requireConfirmation($request, $consequence)) {
             return $unconfirmed;
@@ -52,7 +59,11 @@ class DeletePostTool extends WorkspaceTool
         if (! $hadBeenPublished) {
             $post->delete();
 
-            return Response::text(json_encode(['deleted' => true, 'remote' => false], JSON_THROW_ON_ERROR));
+            return Response::text(json_encode([
+                'deleted' => true,
+                'remote' => false,
+                'approved_fingerprint' => $currentFingerprint,
+            ], JSON_THROW_ON_ERROR));
         }
 
         $post->targets
@@ -61,7 +72,12 @@ class DeletePostTool extends WorkspaceTool
 
         $post->forceFill(['status' => PostStatus::Deleted->value, 'deleted_at' => now()])->save();
 
-        return Response::text(json_encode(['deleted' => true, 'remote' => true, 'message' => 'Remote deletion queued for published targets.'], JSON_THROW_ON_ERROR));
+        return Response::text(json_encode([
+            'deleted' => true,
+            'remote' => true,
+            'approved_fingerprint' => $currentFingerprint,
+            'message' => 'Remote deletion queued for the approved published targets.',
+        ], JSON_THROW_ON_ERROR));
     }
 
     /**
@@ -71,6 +87,7 @@ class DeletePostTool extends WorkspaceTool
     {
         return [
             'post_id' => $schema->string()->description('Id of the post to delete.')->required(),
+            'deletion_fingerprint' => $schema->string()->description('Exact SHA-256 deletion fingerprint returned by get_post for the post and its current remote targets.')->required(),
             'confirm' => $schema->boolean()->description('Must be true to delete.'),
         ];
     }

@@ -2,10 +2,17 @@
 
 use App\Enums\ErrorKind;
 
-test('retryable kinds report retryable', function () {
+test('only provably safe outbound outcomes report retryable', function () {
     expect(ErrorKind::RateLimited->isRetryable())->toBeTrue()
-        ->and(ErrorKind::Network->isRetryable())->toBeTrue()
-        ->and(ErrorKind::ServerError->isRetryable())->toBeTrue();
+        ->and(ErrorKind::MediaProcessing->isRetryable())->toBeTrue()
+        ->and(ErrorKind::Network->isRetryable())->toBeFalse()
+        ->and(ErrorKind::ServerError->isRetryable())->toBeFalse();
+});
+
+test('ambiguous transport outcomes require publish reconciliation', function () {
+    expect(ErrorKind::Network->requiresPublishReconciliation())->toBeTrue()
+        ->and(ErrorKind::ServerError->requiresPublishReconciliation())->toBeTrue()
+        ->and(ErrorKind::RateLimited->requiresPublishReconciliation())->toBeFalse();
 });
 
 test('terminal kinds report not retryable', function () {

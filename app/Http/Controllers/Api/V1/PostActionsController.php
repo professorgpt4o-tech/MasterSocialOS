@@ -104,6 +104,10 @@ class PostActionsController extends Controller
             abort(422, 'Only failed or skipped targets can be retried.');
         }
 
+        if ($postTarget->error_kind?->requiresPublishReconciliation()) {
+            abort(409, 'Retry blocked because the previous outcome is ambiguous. Reconcile the remote platform before retrying.');
+        }
+
         $postTarget->forceFill([
             'status' => PostTargetStatus::Pending->value,
             'error_kind' => null,

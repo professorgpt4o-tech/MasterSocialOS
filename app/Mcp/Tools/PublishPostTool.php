@@ -9,6 +9,7 @@ use App\Mcp\Tools\Concerns\WorkspaceTool;
 use App\Models\Post;
 use App\Services\Billing\WorkspaceSubscriptionGate;
 use App\Services\Publishing\PublishDispatcher;
+use App\Services\Safety\PostActionFingerprint;
 use App\Support\PostView;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
@@ -16,17 +17,22 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Publish a post to its connected accounts immediately. Irreversible and outward-facing. Requires confirm=true. Publishing is asynchronous — poll get_post for per-target results.')]
+#[Description('Publish a post to its connected accounts immediately. Irreversible and outward-facing. Requires confirm=true and the exact approval_fingerprint returned by get_post. Publishing is asynchronous — poll get_post for per-target results.')]
 class PublishPostTool extends WorkspaceTool
 {
-    public function handle(Request $request, PublishDispatcher $dispatcher, WorkspaceSubscriptionGate $subscriptions): Response
-    {
+    public function handle(
+        Request $request,
+        PublishDispatcher $dispatcher,
+        WorkspaceSubscriptionGate $subscriptions,
+        PostActionFingerprint $fingerprints,
+    ): Response {
         if ($this->bindWorkspace($request) === null) {
             return Response::error('This connection is not bound to a workspace. Reconnect and select a workspace.');
         }
 
         $validated = $request->validate([
             'post_id' => ['required', 'string'],
+            'approval_fingerprint' => ['required', 'string', 'size:64', 'regex:/^[a-f0-9]{64}$/'],
             'confirm' => ['boolean'],
         ]);
 
@@ -39,7 +45,12 @@ class PublishPostTool extends WorkspaceTool
             return $denied;
         }
 
-        if ($unconfirmed = $this->requireConfirmation($request, 'This will publicly publish the post to its connected accounts now.')) {
+        $currentFingerprint = $fingerprints->publish($post);
+        if (! hash_equals($currentFingerprint, (string) $validated['approval_fingerprint'])) {
+            return Response::error('Approval fingerprint mismatch. The post, destination, or media changed after approval. Fetch the post again and obtain a new approval before publishing.');
+        }
+
+        if ($unconfirmed = $this->requireConfirmation($request, 'This will publicly publish the exact fingerprinted post to its connected accounts now.')) {
             return $unconfirmed;
         }
 
@@ -52,7 +63,8 @@ class PublishPostTool extends WorkspaceTool
 
         return Response::text(json_encode([
             'status' => 'queued',
-            'message' => 'Publishing started. Poll get_post for per-target status.',
+            'message' => 'Publishing started for the approved fingerprint. Poll get_post for per-target status.',
+            'approved_fingerprint' => $currentFingerprint,
             'post' => PostView::make($post->fresh(['targets.account', 'media'])),
         ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
     }
@@ -64,6 +76,7 @@ class PublishPostTool extends WorkspaceTool
     {
         return [
             'post_id' => $schema->string()->description('Id of the post to publish.')->required(),
+            'approval_fingerprint' => $schema->string()->description('Exact SHA-256 approval fingerprint returned by get_post for the content, media, and destinations being approved.')->required(),
             'confirm' => $schema->boolean()->description('Must be true to actually publish.'),
         ];
     }

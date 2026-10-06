@@ -9,6 +9,7 @@ use App\Models\Post;
 use App\Models\PostTarget;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\Safety\PostActionFingerprint;
 use Illuminate\Support\Facades\Queue;
 
 test('delete_post requires confirmation', function (): void {
@@ -18,21 +19,26 @@ test('delete_post requires confirmation', function (): void {
     bindTokenToWorkspace($user, $workspace);
     $post = Post::factory()->for($workspace)->create(['status' => PostStatus::Draft->value]);
 
-    $response = ShoutrrrServer::actingAs($user)->tool(DeletePostTool::class, ['post_id' => $post->id]);
+    $response = ShoutrrrServer::actingAs($user)->tool(DeletePostTool::class, [
+        'post_id' => $post->id,
+        'deletion_fingerprint' => app(PostActionFingerprint::class)->delete($post),
+    ]);
 
     $response->assertHasErrors();
     expect(Post::find($post->id))->not->toBeNull();
 });
 
-test('delete_post with confirm hard-deletes a draft', function (): void {
+test('delete_post with matching fingerprint and confirm hard-deletes a draft', function (): void {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     bindTokenToWorkspace($user, $workspace);
     $post = Post::factory()->for($workspace)->create(['status' => PostStatus::Draft->value]);
+    $fingerprint = app(PostActionFingerprint::class)->delete($post);
 
     $response = ShoutrrrServer::actingAs($user)->tool(DeletePostTool::class, [
         'post_id' => $post->id,
+        'deletion_fingerprint' => $fingerprint,
         'confirm' => true,
     ]);
 
@@ -40,7 +46,7 @@ test('delete_post with confirm hard-deletes a draft', function (): void {
     expect(Post::find($post->id))->toBeNull();
 });
 
-test('delete_post with confirm soft-deletes a published post and dispatches remote delete for targets with remote_id', function (): void {
+test('delete_post with matching fingerprint soft-deletes a published post and dispatches remote delete for targets with remote_id', function (): void {
     Queue::fake();
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create();
@@ -56,9 +62,11 @@ test('delete_post with confirm soft-deletes a published post and dispatches remo
         'status' => PostTargetStatus::Published->value,
         'remote_id' => null,
     ]);
+    $fingerprint = app(PostActionFingerprint::class)->delete($post->fresh(['targets.placements', 'media']));
 
     $response = ShoutrrrServer::actingAs($user)->tool(DeletePostTool::class, [
         'post_id' => $post->id,
+        'deletion_fingerprint' => $fingerprint,
         'confirm' => true,
     ]);
 
@@ -70,4 +78,31 @@ test('delete_post with confirm soft-deletes a published post and dispatches remo
         DeletePostTarget::class,
         fn (DeletePostTarget $job): bool => $job->target->is($targetWithRemote)
     );
+});
+
+test('delete_post refuses stale fingerprint when remote targets change', function (): void {
+    Queue::fake();
+    $user = User::factory()->create();
+    $workspace = Workspace::factory()->create();
+    $user->forceFill(['current_workspace_id' => $workspace->id])->save();
+    bindTokenToWorkspace($user, $workspace);
+
+    $post = Post::factory()->for($workspace)->create(['status' => PostStatus::Published->value]);
+    $target = PostTarget::factory()->for($post)->create([
+        'status' => PostTargetStatus::Published->value,
+        'remote_id' => 'remote-original',
+    ]);
+    $fingerprint = app(PostActionFingerprint::class)->delete($post->fresh(['targets.placements', 'media']));
+
+    $target->forceFill(['remote_id' => 'remote-changed'])->save();
+
+    $response = ShoutrrrServer::actingAs($user)->tool(DeletePostTool::class, [
+        'post_id' => $post->id,
+        'deletion_fingerprint' => $fingerprint,
+        'confirm' => true,
+    ]);
+
+    $response->assertHasErrors();
+    expect($post->fresh()->status)->toBe(PostStatus::Published);
+    Queue::assertNothingPushed();
 });

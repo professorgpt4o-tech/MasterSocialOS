@@ -30,7 +30,7 @@ test('LinkedIn repost posts a reshare referencing the parent urn', function (): 
         && $request['reshareContext']['parent'] === 'urn:li:share:111');
 });
 
-test('LinkedIn repost maps a connection failure to a retryable network result', function (): void {
+test('LinkedIn repost maps a connection failure to a non-retryable ambiguous network result', function (): void {
     Http::fake(fn () => throw new ConnectionException('offline'));
 
     $account = ConnectedAccount::factory()->create(['platform' => Platform::LinkedIn, 'remote_account_id' => 'PERSON1']);
@@ -43,5 +43,5 @@ test('LinkedIn repost maps a connection failure to a retryable network result', 
     $result = app(LinkedInConnector::class)->repost(new RepostContext($target, $account, ['access_token' => 'tok']));
 
     expect($result->isSuccessful())->toBeFalse()
-        ->and($result->errorKind?->isRetryable())->toBeTrue();
+        ->and($result->errorKind?->isRetryable())->toBeFalse();
 });

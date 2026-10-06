@@ -10,6 +10,7 @@ use App\Models\PostMedia;
 use App\Models\PostMediaPlacement;
 use App\Models\PostTarget;
 use App\Services\Posts\PostSplitter;
+use App\Services\Safety\PostActionFingerprint;
 
 final class PostView
 {
@@ -18,9 +19,10 @@ final class PostView
      */
     public static function make(Post $post): array
     {
-        $post->loadMissing('targets.placements');
+        $post->loadMissing(['targets.placements', 'media']);
 
         $splitter = app(PostSplitter::class);
+        $fingerprints = app(PostActionFingerprint::class);
         $mediaCount = $post->media->count();
         $defaultAccountId = $post->workspace()->value('default_connected_account_id');
         $defaultTarget = $post->targets
@@ -38,6 +40,8 @@ final class PostView
             'skip_sync' => $post->skip_sync,
             'published_at' => $post->published_at?->toIso8601String(),
             'updated_at' => $post->updated_at->toIso8601String(),
+            'approval_fingerprint' => $fingerprints->publish($post),
+            'deletion_fingerprint' => $fingerprints->delete($post),
             'destination' => self::destination($post),
             'targets' => $post->targets
                 ->sortByDesc(fn (PostTarget $target): bool => $target->connected_account_id === $defaultAccountId)
