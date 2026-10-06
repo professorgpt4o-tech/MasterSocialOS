@@ -21,6 +21,7 @@ use App\Mcp\Tools\ListSharesTool;
 use App\Mcp\Tools\ListWorkspacesTool;
 use App\Mcp\Tools\PublishPostTool;
 use App\Mcp\Tools\QueuePostTool;
+use App\Mcp\Tools\ReconcilePostTargetTool;
 use App\Mcp\Tools\RemovePostMediaTool;
 use App\Mcp\Tools\RetryPostTargetTool;
 use App\Mcp\Tools\SchedulePostTool;
@@ -32,9 +33,9 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Version;
 use Laravel\Mcp\Server\Tool;
 
-#[Name('Shoutrrr')]
-#[Version('1.0.0')]
-#[Instructions('Read and manage social posts, schedules, and connected accounts for one workspace. The workspace is fixed at connection time. Use list_workspaces to see which workspace this connection operates on; reconnect to switch. Write tools let you create and edit drafts, schedule, manage media and account sets, and share links. Irreversible outward-facing actions (publish_post_now, retry_post_target, delete_post) require explicit human confirmation — call them with confirm=true only after the human approves.')]
+#[Name('MasterSocialOS')]
+#[Version('1.1.0')]
+#[Instructions('Read and manage social posts, schedules, and connected accounts for one workspace. The workspace is fixed at connection time. Irreversible outward-facing actions require explicit human confirmation and exact action fingerprints. Never retry a network/server publish failure blindly: call reconcile_post_target first. A retry is permitted only when the prior outcome is non-ambiguous or remote reconciliation has resolved it.')]
 class ShoutrrrServer extends Server
 {
     /**
@@ -61,6 +62,7 @@ class ShoutrrrServer extends Server
         ListSharesTool::class,
         DeleteShareTool::class,
         PublishPostTool::class,
+        ReconcilePostTargetTool::class,
         RetryPostTargetTool::class,
         DeletePostTool::class,
     ];
