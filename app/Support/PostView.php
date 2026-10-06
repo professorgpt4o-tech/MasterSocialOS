@@ -19,7 +19,7 @@ final class PostView
      */
     public static function make(Post $post): array
     {
-        $post->loadMissing('targets.placements', 'media');
+        $post->loadMissing(['targets.placements', 'media']);
 
         $splitter = app(PostSplitter::class);
         $fingerprints = app(PostActionFingerprint::class);
