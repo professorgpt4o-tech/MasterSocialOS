@@ -21,6 +21,11 @@ class PostTargetRetryController extends Controller
     {
         abort_unless($request->user()->can('update', $post), 403);
         abort_unless($target->status->isRetryable(), 409);
+        abort_if(
+            $target->error_kind?->requiresPublishReconciliation() ?? false,
+            409,
+            'Retry blocked because the previous outcome is ambiguous. Reconcile the remote platform before retrying.',
+        );
 
         $target->forceFill([
             'status' => PostTargetStatus::Pending->value,
