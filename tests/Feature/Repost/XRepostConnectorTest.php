@@ -41,7 +41,7 @@ test('X repost maps a failed response to a failure result', function (): void {
     expect($result->isSuccessful())->toBeFalse();
 });
 
-test('X repost maps a connection failure to a retryable network result', function (): void {
+test('X repost maps a connection failure to a non-retryable ambiguous network result', function (): void {
     Http::fake(fn () => throw new ConnectionException('offline'));
 
     $account = ConnectedAccount::factory()->create(['platform' => Platform::X, 'remote_account_id' => 'U']);
@@ -50,5 +50,5 @@ test('X repost maps a connection failure to a retryable network result', functio
     $result = app(XConnector::class)->repost(new RepostContext($target, $account, ['access_token' => 'tok']));
 
     expect($result->isSuccessful())->toBeFalse()
-        ->and($result->errorKind?->isRetryable())->toBeTrue();
+        ->and($result->errorKind?->isRetryable())->toBeFalse();
 });
